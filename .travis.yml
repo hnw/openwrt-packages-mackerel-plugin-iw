@@ -1,0 +1,62 @@
+sudo: required
+language: c
+services: docker
+
+env:
+  global:
+    - DOCKERHUB_IMG=yhnw/openwrt-sdk
+    - PKG_NAME=mackerel-plugin-iw
+    - OPENWRT_GID=1000
+    - QUIET=1 # 1: suppress build log / "": output all
+  matrix:
+    - DISTRO=openwrt-15.05.1 ARCH=ar71xx        PKG_DIR=bin/ar71xx/packages
+    - DISTRO=lede-17.01.3    ARCH=ar71xx        PKG_DIR=bin/packages/mips_24kc
+    - DISTRO=lede-17.01.3    ARCH=ramips-mt7620 PKG_DIR=bin/packages/mipsel_24kc
+    - DISTRO=lede-17.01.3    ARCH=bcm53xx       PKG_DIR=bin/packages/arm_cortex-a9
+
+before_install:
+  - docker version
+  - mkdir $PWD/pkgs
+  - |
+    if [[ "$(cat /etc/group | grep $OPENWRT_GID | wc -l)" == "0" ]]; then
+        sudo groupadd -g $OPENWRT_GID openwrt
+        sudo chgrp openwrt $PWD/pkgs
+    else
+        sudo chgrp "$(getent group $OPENWRT_GID | cut -d: -f1)" $PWD/pkgs
+    fi
+  - sudo chmod g+ws $PWD/pkgs
+
+script:
+  - docker run --rm -u openwrt -v $PWD:/work ${DOCKERHUB_IMG}:${DISTRO}-${ARCH} /bin/bash /work/build.sh ${DISTRO}-${ARCH} $PKG_DIR $PKG_NAME $QUIET
+  - ls -la
+
+after_failure:
+  - if [[ -e pkgs/build.log ]]; then tail -300 pkgs/build.log; fi
+
+deploy:
+  - provider: releases
+    api_key:
+      secure: "mUFuhwNCyzH9srqAUCgro02tdd5btRufN+gie0J3RFx1VjSHCfplp8VLM7fxDOWnacqg9P8DvyfyP0NQLY50aZpSLrD3lKFbznY7miSrIAKCzAJwVaz82P7Q+0i384wE44P9OcYiL+2bLbL2TcRz7pv/UC5ysgVjr1ij3Q4HY1AvunWqj24h4MZTXmcF37PhRZ0cUUZpJ2ofy+GD4c+upsTAUkLBIJoQAd3OvGLSPcSf3KpFcJ3nXVYkv3th+Evg0k5ElxmQqHd93RJNfeU3Gw9ac1g1Rb6cSmV4CKapRkXcaofOVqocvCXla+gr6Bzd1hc46/PY7WQzMSaHE0RjuN0xJA/jaeaDhYQGv7Jy5iYFfj/C4k04pzyjD6h9vAA4YK/6+NjiO53QmBW7UvkkjXga1yGxDXqcHSRPmFya5wxCTT+0CMFi+AGBaIVZrhwl8ui5xzI/C1GKqIQEE6FKoBs5txkQ4jgIkxZFD81nmIABHoD8lFvC345o7HVRBJPfGzGd/b6M0IJ93HQaI3QvoejDABvDHO/VM4EZYEmVZKCWltvcJ4PR0yikO7u1PiIT1Mec4YjFej7KcMUNsmyT7eY10fUS0CQZnVzA6SNEm2xqRqhjU6WdutMx/PE0wF3Mlumc+gF5n4PzV0FF5ZvSv+KJ8zzSAj3Vhu9511QLviU="
+    file_glob: true
+    file: "pkgs/for-github/*.ipk"
+    skip_cleanup: true
+    on:
+      tags: true
+  - provider: gcs
+    access_key_id: "GOOGZU4AGJJUVQ4DLX52"
+    secret_access_key:
+      secure: "oh0+XArPLR1WbmKUigqpH339Ux4rs6mf43zxq7FXz6epWY47L3TXx5ClysSZmdRBHdcsJSRd/mZGsBNXvMDKubTYuLsUxk0EdAk9uvvC0N1neb7CFORGA7cZRkCVihTe2hXA0jzdv9jsT/15+XDHHjRqubYCPcE6Su3K1wQrjkDwl1aXTjCW02T7CfOpKfTZCJ5oNliltvtpgOl64sSqrbHyjC6McXk9HILO3rB68Yd5JsjHIxr9DD6FwHcghZQwIKfwuY1MPi6K1behurrv0EBLGRSFhfeoUSTXEOPxFb2h4QuOSX7pU6vjJa0pf96BmNhPD/iPSGjHWQiz0ePAKLri4tWRXDDiv44I8CwzSqffQh9nqOSy5Hm4pUYr2wfwdLFBVcZQhveDwflHNBpoWxLOy2oLbbpyUWjcmEByuICI6Gyx/J6FAmziYfWhbxXxVBuqQeVt40jrj/gflBXMyqKDANviFrLzzsb/BZXsSr6DLxyGvSuF4+zTHEgJ7UMgCXeASCOLAxhPllxnbnpcHRL6CamhLSJas1iRWJh2A8pO4YuSqTZgDyK1IGs1up9raH+VBIWICPnFm4P6ofLOmeKchcuoxfcQL5GlQyEgvygxV3gfRn03Cej2bIYFL6velFZvlBe+lmuEfldPwOXHj7JFpcozbmXisDQbCA+fHNw="
+    bucket: "hnw-gcs-bucket-for-travis"
+    skip_cleanup: true
+    local-dir: pkgs/for-github/
+    upload-dir: $(basename ${TRAVIS_REPO_SLUG})-${TRAVIS_BUILD_NUMBER}
+    on:
+      branch: master
+
+jobs:
+  include:
+    -
+      if: branch = master
+      stage: Push release tag
+      script: ./git-tag.sh
+      deploy: []

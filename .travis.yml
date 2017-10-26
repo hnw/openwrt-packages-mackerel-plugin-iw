@@ -5,58 +5,88 @@ services: docker
 env:
   global:
     - DOCKERHUB_IMG=yhnw/openwrt-sdk
+    - PKG_REPOS_URL=https://github.com/hnw/openwrt-packages.git
     - PKG_NAME=mackerel-plugin-iw
     - OPENWRT_GID=1000
-    - QUIET=1 # 1: suppress build log / "": output all
+    - GCS_ACCESS_KEY_ID=GOOGZU4AGJJUVQ4DLX52
+    - GCS_BUCKET=hnw-gcs-bucket-for-travis
+    - GCS_UPLOAD_DIR="$(basename ${TRAVIS_REPO_SLUG})-${TRAVIS_BUILD_NUMBER}"
+    - secure: "ABgPql40r/FURNJQXa115yr/Z3iyhfilya2gU9KH1quKAmbGWIQ4dUsSAdZRWZW0ELOCILphXblVtElfVMrGOeSVOiak9EdQeTQ55ul9f0PHPx9RAIOVEc+frznL5fkwqf6g5B340tqE5OP+hjwPEtaFzEbHvPRYSrdG6pa+WMcALK3BQQ+BmcNCLHW1IdYL/8PeSsWtbOILZTkt1R1v/baZ1TBp49oh+6kLF6TpfynfXABMLysN7VW6SyFcRr+3x+B4fey8KJDBa7uAKK6dY9FkfFeDS7UEBFxvLXhvOtVE2pFomTT9qIxT64zpqKa0Wes0GXaFA0k3uPJpRSQhM37LFDdNBdxdJj5ivD9kgitl9lqR+kFcz5BBLfzoRZHdnxb/X0t4BhpYcaal7vH/PIedAzD8fl0BmPR9IILMOJWLnaFlzputxKE64ocnVK9/JDBdrw1M2tfBXYVzcrPVzNZTMxm1d63lIHvi98w6EeLVjOrrW+M3fZ+xb/Dk3tfe2cWmup+MStWraRa/665puvI3ekyCp03gpplmJH7w1RDmaLJHdIt7SXUvXRp77zKTJk5HL5+sH4QVYyzIi9sfsbOf58oDoAFlSs3e4cAvMVBxDnaQ6wj9GYeSwAC21MEpxPsvSdM8qDauvSAyjtk142+G0DpksYVMV78+LRD7zgE="
+    - VERBOSE=1
   matrix:
-    - DISTRO=openwrt-15.05.1 ARCH=ar71xx        PKG_DIR=bin/ar71xx/packages
-    - DISTRO=lede-17.01.3    ARCH=ar71xx        PKG_DIR=bin/packages/mips_24kc
-    - DISTRO=lede-17.01.3    ARCH=ramips-mt7620 PKG_DIR=bin/packages/mipsel_24kc
-    - DISTRO=lede-17.01.3    ARCH=bcm53xx       PKG_DIR=bin/packages/arm_cortex-a9
-
-before_install:
-  - docker version
-  - mkdir $PWD/pkgs
-  - |
-    if [[ "$(cat /etc/group | grep $OPENWRT_GID | wc -l)" == "0" ]]; then
-        sudo groupadd -g $OPENWRT_GID openwrt
-        sudo chgrp openwrt $PWD/pkgs
-    else
-        sudo chgrp "$(getent group $OPENWRT_GID | cut -d: -f1)" $PWD/pkgs
-    fi
-  - sudo chmod g+ws $PWD/pkgs
+    - DOCKERHUB_TAG=15.05.1-ar71xx      BUILD_DIR=bin/ar71xx/packages        OUT_DIR=15.05.1/mips_24kc
+    - DOCKERHUB_TAG=17.01-ar71xx        BUILD_DIR=bin/packages/mips_24kc     OUT_DIR=17.01/mips_24kc
+    - DOCKERHUB_TAG=17.01-ramips-mt7620 BUILD_DIR=bin/packages/mipsel_24kc   OUT_DIR=17.01/mipsel_24kc
+    - DOCKERHUB_TAG=17.01-bcm53xx       BUILD_DIR=bin/packages/arm_cortex-a9 OUT_DIR=17.01/arm_cortex-a9
 
 script:
-  - docker run --rm -u openwrt -v $PWD:/work ${DOCKERHUB_IMG}:${DISTRO}-${ARCH} /bin/bash /work/build.sh ${DISTRO}-${ARCH} $PKG_DIR $PKG_NAME $QUIET
+  - mkdir -p $PWD/pkgs
+  - scripts/chgrp-for-docker.sh -g $OPENWRT_GID $PWD/pkgs
+  - docker run --rm -u openwrt -v $PWD:/work ${DOCKERHUB_IMG}:${DOCKERHUB_TAG} /bin/bash /work/scripts/build.sh $PKG_NAME $BUILD_DIR /work /work/pkgs $OUT_DIR $VERBOSE
   - ls -la
 
 after_failure:
-  - if [[ -e pkgs/build.log ]]; then tail -300 pkgs/build.log; fi
+  - if [[ -e pkgs/build.log ]] ; then tail -300 pkgs/build.log ; fi
+
+before_deploy:
+  - |
+    if [[ -n ${TRAVIS_TAG} || -n ${TRAVIS_BRANCH} && ${TRAVIS_BRANCH} == "master" ]] ; then
+        scripts/extract-encrypted-tar.sh -K $encrypted_f68985f94d31_key -iv $encrypted_f68985f94d31_iv secrets.tar.enc
+        if [[ -e $HOME/.ssh ]] ; then
+            mv $HOME/.ssh $HOME/.ssh.orig
+        fi
+        if [[ -n ${TRAVIS_TAG} ]] ; then
+            echo "This build is triggered by tag: preparing deploy-key for pushing binary packages"
+            mv .ssh_for_push_pkgs $HOME/.ssh
+        else
+            echo "We are on master branch: preparing deploy-key for pushing release tag"
+            mv .ssh_for_push_tag $HOME/.ssh
+        fi
+    fi
 
 deploy:
   - provider: releases
     api_key:
       secure: "mUFuhwNCyzH9srqAUCgro02tdd5btRufN+gie0J3RFx1VjSHCfplp8VLM7fxDOWnacqg9P8DvyfyP0NQLY50aZpSLrD3lKFbznY7miSrIAKCzAJwVaz82P7Q+0i384wE44P9OcYiL+2bLbL2TcRz7pv/UC5ysgVjr1ij3Q4HY1AvunWqj24h4MZTXmcF37PhRZ0cUUZpJ2ofy+GD4c+upsTAUkLBIJoQAd3OvGLSPcSf3KpFcJ3nXVYkv3th+Evg0k5ElxmQqHd93RJNfeU3Gw9ac1g1Rb6cSmV4CKapRkXcaofOVqocvCXla+gr6Bzd1hc46/PY7WQzMSaHE0RjuN0xJA/jaeaDhYQGv7Jy5iYFfj/C4k04pzyjD6h9vAA4YK/6+NjiO53QmBW7UvkkjXga1yGxDXqcHSRPmFya5wxCTT+0CMFi+AGBaIVZrhwl8ui5xzI/C1GKqIQEE6FKoBs5txkQ4jgIkxZFD81nmIABHoD8lFvC345o7HVRBJPfGzGd/b6M0IJ93HQaI3QvoejDABvDHO/VM4EZYEmVZKCWltvcJ4PR0yikO7u1PiIT1Mec4YjFej7KcMUNsmyT7eY10fUS0CQZnVzA6SNEm2xqRqhjU6WdutMx/PE0wF3Mlumc+gF5n4PzV0FF5ZvSv+KJ8zzSAj3Vhu9511QLviU="
     file_glob: true
-    file: "pkgs/for-github/*.ipk"
+    file: "pkgs/flattened/*.ipk"
     skip_cleanup: true
     on:
       tags: true
   - provider: gcs
-    access_key_id: "GOOGZU4AGJJUVQ4DLX52"
-    secret_access_key:
-      secure: "oh0+XArPLR1WbmKUigqpH339Ux4rs6mf43zxq7FXz6epWY47L3TXx5ClysSZmdRBHdcsJSRd/mZGsBNXvMDKubTYuLsUxk0EdAk9uvvC0N1neb7CFORGA7cZRkCVihTe2hXA0jzdv9jsT/15+XDHHjRqubYCPcE6Su3K1wQrjkDwl1aXTjCW02T7CfOpKfTZCJ5oNliltvtpgOl64sSqrbHyjC6McXk9HILO3rB68Yd5JsjHIxr9DD6FwHcghZQwIKfwuY1MPi6K1behurrv0EBLGRSFhfeoUSTXEOPxFb2h4QuOSX7pU6vjJa0pf96BmNhPD/iPSGjHWQiz0ePAKLri4tWRXDDiv44I8CwzSqffQh9nqOSy5Hm4pUYr2wfwdLFBVcZQhveDwflHNBpoWxLOy2oLbbpyUWjcmEByuICI6Gyx/J6FAmziYfWhbxXxVBuqQeVt40jrj/gflBXMyqKDANviFrLzzsb/BZXsSr6DLxyGvSuF4+zTHEgJ7UMgCXeASCOLAxhPllxnbnpcHRL6CamhLSJas1iRWJh2A8pO4YuSqTZgDyK1IGs1up9raH+VBIWICPnFm4P6ofLOmeKchcuoxfcQL5GlQyEgvygxV3gfRn03Cej2bIYFL6velFZvlBe+lmuEfldPwOXHj7JFpcozbmXisDQbCA+fHNw="
-    bucket: "hnw-gcs-bucket-for-travis"
+    access_key_id: ${GCS_ACCESS_KEY_ID}
+    secret_access_key: ${GCS_SECRET_ACCESS_KEY}
+    bucket: ${GCS_BUCKET}
     skip_cleanup: true
-    local-dir: pkgs/for-github/
-    upload-dir: $(basename ${TRAVIS_REPO_SLUG})-${TRAVIS_BUILD_NUMBER}
+    local-dir: pkgs/structured/
+    upload-dir: ${GCS_UPLOAD_DIR}
+    all_branches: true
+  - provider: gcs
+    access_key_id: ${GCS_ACCESS_KEY_ID}
+    secret_access_key: ${GCS_SECRET_ACCESS_KEY}
+    bucket: ${GCS_BUCKET}
+    skip_cleanup: true
+    local-dir: pkgs/structured/
+    upload-dir: ${GCS_UPLOAD_DIR}
     on:
-      branch: master
+      tags: true
 
 jobs:
   include:
-    -
-      if: branch = master
+    - if: branch = master
       stage: Push release tag
-      script: ./git-tag.sh
-      deploy: []
+      script: skip
+      deploy:
+        - provider: script
+          script: scripts/push-tag.sh
+    - if: tag IS present
+      stage: Publish binary packages to repos
+      script:
+        - git clone --branch=master ${PKG_REPOS_URL} ../repos
+        - envsubst < .boto.in > $HOME/.boto
+        - gsutil cp -r s3://${GCS_BUCKET}/${GCS_UPLOAD_DIR}/'*' ../repos
+      deploy:
+        - provider: script
+          script: scripts/push-pkgs.sh ../repos
+          on:
+            tags: true

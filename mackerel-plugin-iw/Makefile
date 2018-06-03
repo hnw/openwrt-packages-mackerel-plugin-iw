@@ -1,13 +1,13 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mackerel-plugin-iw
-PKG_VERSION:=0.1.0
+PKG_VERSION:=0.1.1
 PKG_RELEASE:=1
 
 PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
 PKG_SOURCE:=v$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://github.com/hnw/mackerel-plugin-iw/archive/
-PKG_MD5SUM:=4b864303904085f85c5adf71e830c768
+PKG_MD5SUM:=48b7a1079078ca25d7bbea673fd85e1c
 
 PKG_BUILD_PARALLEL:=1
 PKG_INSTALL:=1

@@ -4,7 +4,13 @@ This is [mackerel-plugin-iw](https://github.com/hnw/mackerel-plugin-iw/) package
 
 # How to install binary package
 
-See [hnw/openwrt-packages](https://github.com/hnw/openwrt-packages).
+```
+$ opkg install mackerel-plugin-iw
+$ /etc/init.d/mackerel-agent stop
+$ /etc/init.d/mackerel-agent start
+```
+
+See Also [hnw/openwrt-packages](https://github.com/hnw/openwrt-packages).
 
 # How to build
 
